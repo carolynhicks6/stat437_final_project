@@ -1,0 +1,318 @@
+---
+title: "qbio_project draft"
+output:
+  html_document: default
+  word_document: default
+date: "2026-04-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+Libraries
+```{r}
+library(OncoDataSets)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(lattice)
+library(caret)
+library(kerndwd)
+library(randomForest)
+```
+Load in Data
+```{r}
+df <- OncoDataSets::BreastCancerWI_df
+```
+
+## Part 1: Entropy/Information Gain Analysis
+
+Reference: (https://rstudio-pubs-static.s3.amazonaws.com/455435_30729e265f7a4d049400d03a18e218db.html)
+
+The goal is to identify which variables contain the most information and use these to train the models. 
+
+Defining Entropy
+```{r}
+entropy <- function(X) {
+  #create frequency table of X (count table devided by length of X) 
+  freq <- table(X)/length(X)
+  
+  #make frequencies a vector
+  vec <- as.data.frame(freq)[,2]
+  
+  #remove any zero counts if they occur because we will take log
+  vec<-vec[vec>0]
+
+  #entropy equation
+  -sum(vec * log2(vec))
+}
+```
+
+Testing Entropy function
+```{r}
+#looking at table
+freq <- table(df$diagnosis)/length(df$diagnosis)
+freq
+
+#looking at vector
+vec <- as.data.frame(freq)[,2]
+vec
+
+#testing function
+entf<- entropy(df$diagnosis)
+entf
+
+#manually doing math
+entm <- -(vec[1]*log2(vec[1]) + vec[2]*log2(vec[2]))
+entm 
+
+#check
+entf == entm
+```
+Now to define information gain.
+
+Our predictive variables are numerical but entropy works with categorical variables, so we will need to define a number of ranges to cover each and make them discrete categories, since entropy takes discrete values. We can define these by dividing the whole range into a number of bins. 
+
+Information gain will need to be calculated for each potential feature in our dataset that might provide information on what we want to predict (diagnosis), which is the 'parent'.
+
+Information Gain (Numeric)
+```{r}
+
+#I'm going to split the function the resource used into two to more easily test and view it. The first part returns dd_data
+
+dd <-function(data, feature, parent, bins) {
+ #clean out N/As
+  data <- data[!is.na(data[,feature]),]
+  
+  #now break up our dataset into bins based on length
+  data$cat<-cut(data[,feature], breaks=bins, labels=c(1:bins))
+  
+  #now we need to calculate the entropy of each feature (e)
+  #we will need to know how many items fall in each bin (n)
+  #to calculate frequency
+  #we can also look at max and mins for each bin if we want
+  
+  dd_data <- data %>% group_by(cat) %>% summarise(e=entropy(get(parent)), n = length(get(parent)), min=min(get(feature)), max=max(get(feature))   
+  )
+  
+  #now we need the probability for each feature value
+  dd_data$p<-dd_data$n/nrow(data)
+  
+  return(dd_data)
+}
+
+#now the IG 
+ig_num <- function(data, feature, parent, bins=5) {
+  
+  #entropy for our parent
+  eP <- entropy(data[,parent])
+  
+  #call dd
+  dd_data <- dd(data, feature, parent, bins)
+  
+  #and finally we can get our information gain
+  IG <- eP - sum(dd_data$p*dd_data$e)
+  
+  return(IG)
+}
+```
+
+Testing Information Gain
+```{r}
+#test on one feature first
+ig_num(df, "radius_mean", "diagnosis")
+
+#look at dd_data
+dd(df,"radius_mean", "diagnosis", 5)
+```
+It looks like 5 bins may be too much for this category, as the feature entropy drops to zero for the last two bins.
+
+Trying different bin numbers: 
+```{r}
+ig_num(df, "radius_mean", "diagnosis", bins=3)
+
+#look at dd_data
+dd(df,"radius_mean", "diagnosis", 3)
+```
+Interestingly, we still lose the last bin, and the information gain drops, so 5 bins is better!
+
+More bin number tests:
+```{r}
+ig_num(df, "radius_mean", "diagnosis", bins=4)
+ig_num(df, "radius_mean", "diagnosis", bins=7)
+ig_num(df, "radius_mean", "diagnosis", bins=10)
+ig_num(df, "radius_mean", "diagnosis", bins=15)
+```
+As expected, as number of bins increases, the IG increases, but at a certain point there are fewer gains. 
+
+We may want to consider whether different variables should have different bin numbers.
+
+Lets look at information gain for 5 bins with all variables.
+```{r}
+#for loop
+
+#define empty vectors
+col_name<-character()
+ig<-numeric()
+
+features <- names(df)
+length(features)
+
+for (i in 2:length(features)){
+  col_name[i]<-features[i]
+  ig[i]<-ig_num(df, names(df)[i], "diagnosis", bins=5)
+}
+
+ig_df<-arrange(data.frame(cbind(col_name, round(ig,2))),desc(V2))
+
+ig_df
+```
+We definitely need to weed out variables that are highly cross correlated.
+
+```{r}
+M = cor(select(df,concave_points_peak, c(ig_df$col_name[1:20])))
+corrplot(M, method = 'number') # colorful number
+```
+Decided to Use PCA to limit variables.
+
+## Pt 2 Training Setup
+
+PCAs
+```{r}
+pca <- prcomp(BreastCancerWI_df[, -1], center=TRUE, scale.=TRUE) #removing diagnostics column
+data.pca <- data.frame(diagnosis = df$diagnosis, pca$x[,1:10])
+```
+
+Tried Entropy on PCAs just to See
+```{r}
+col_name2<-character()
+ig2<-numeric()
+
+features2 <- names(data.pca)
+length(features2)
+
+for (i in 2:length(features2)){
+  col_name2[i]<-features2[i]
+  ig2[i]<-ig_num(data.pca, names(data.pca)[i], "diagnosis", bins=5)
+}
+
+ig_df2<-arrange(data.frame(cbind(col_name2, round(ig2,2))),desc(V2))
+
+ig_df2
+```
+
+
+Source: https://machinelearningmastery.com/machine-learning-in-r-step-by-step/
+Needed package 'caret'
+
+Set up training and verification datasets (70:30)
+```{r}
+
+#will need multiple seeds, easiest to set up vector of seeds from one seed
+set.seed(456)
+
+#grabs indices of 70% of data with preserved class distribution for diagnosis
+train.index <- createDataPartition(data.pca$diagnosis, p=0.70, list=FALSE)
+
+#creates training dataset
+training <- data.pca[train.index,]
+
+#creates validation dataset
+validation <- data.pca[-train.index,]
+```
+
+Training Harness
+(Setting up our training parameters)
+```{r}
+
+#We will need multiple seeds throughout process, can set up seed vector of length one per model
+#we need one seed per model
+#should be (model types x number of splits x number of repeats for repeated cross validation)
+#paper does not do this!!!
+#also makes it seem like they are doing 70/30 for training as well when its 9/10
+
+set.seed(456)
+
+seedlist <- vector(mode = "list", length = 31)
+for (i in 1:30) seedlist[[i]] <- sample.int(1000, 22)
+seedlist[[31]] <- sample.int(1000, 1)
+
+#as paper has done, we use repeated cross-validation with k=3 and 10 part splits
+
+control <- trainControl(method = "repeatedcv", number=10, repeats = 3, seeds = seedlist)
+metric <- "Accuracy"
+```
+
+Train LDA
+```{r, echo=FALSE}
+fit.lda2 <- train(diagnosis~., data=training, method="lda2", metric=metric, trControl=control)
+fit.rf <- train(diagnosis~., data=training, method="rf", metric=metric, trControl=control)
+```
+
+Checks
+```{r}
+results <- resamples(list(lda=fit.lda2, rf=fit.rf))
+summary(results)
+
+dotplot(results)
+```
+
+## Scrap Heap (ignore)
+```{r}
+#install.packages("OncoDataSets")
+#needs bioconductor installs for maftools and tcgabiolinks
+#library(OncoDataSets)
+#library(maftools)
+#library(TCGAbiolinks)
+```
+
+```{r}
+#query <- GDCquery(
+    #project = "TCGA-CHOL", 
+    #data.category = "Simple Nucleotide Variation", 
+    #access = "open",
+    #data.type = "Masked Somatic Mutation", 
+    #workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking"
+#)
+#GDCdownload(query)
+#maf <- GDCprepare(query)
+
+#https://bioconductor.org/packages//release/bioc/vignettes/TCGAbiolinks/inst/doc/mutation.html
+```
+```{r}
+#query <- GDCquery(
+    #project = "CPTAC-3", 
+    #data.category = "Simple Nucleotide Variation", 
+    #access = "open",
+    #data.type = "Masked Somatic Mutation", 
+    #workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking"
+#)
+#GDCdownload(query)
+
+
+#https://bioconductor.org/packages//release/bioc/vignettes/TCGAbiolinks/inst/doc/mutation.html
+```
+
+```{r}
+
+#laml.maf = system.file('extdata', 'tcga_laml.maf.gz', package = 'maftools') 
+
+#laml.clin = system.file('extdata', 'tcga_laml_annot.tsv', package = 'maftools') 
+
+#laml = read.maf(maf = laml.maf, clinicalData = laml.clin)
+```
+
+```{r}
+#query <- GDCquery(
+   #project = "CPTAC-3", 
+    #data.category = "Simple Nucleotide Variation", 
+    #access = "open",
+    #data.type = "Masked Somatic Mutation", 
+    #workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking"
+#)
+#GDCdownload(query, method = client, files.per.chunk = 10)
+#maf <- GDCprepare(query)
+```
