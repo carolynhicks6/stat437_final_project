@@ -1,0 +1,148 @@
+---
+title: "run_and_test_models"
+output: html_document
+date: "2026-04-22"
+---
+
+PCAs
+```{r}
+pca <- prcomp(BreastCancerWI_df[, -1], center=TRUE, scale.=TRUE) #removing diagnostics column
+data.pca <- data.frame(diagnosis = df$diagnosis, pca$x[,1:10])
+```
+
+Source: https://machinelearningmastery.com/machine-learning-in-r-step-by-step/
+Needed package 'caret'
+
+Set up training and verification datasets (70:30)
+```{r}
+library(caret)
+```
+
+```{r}
+#will need multiple seeds, easiest to set up vector of seeds from one seed
+set.seed(456)
+
+#grabs indices of 70% of data with preserved class distribution for diagnosis
+train.index <- createDataPartition(data.pca$diagnosis, p=0.70, list=FALSE)
+
+#creates training dataset
+training <- data.pca[train.index,]
+
+#creates validation dataset
+validation <- data.pca[-train.index,]
+```
+
+Training Harness
+(Setting up our training parameters)
+```{r}
+
+#We will need multiple seeds throughout process, can set up seed vector of length one per model
+#we need one seed per model
+#should be (model types x number of splits x number of repeats for repeated cross validation)
+#paper does not do this!!!
+#also makes it seem like they are doing 70/30 for training as well when its 9/10
+
+set.seed(456)
+
+seedlist <- vector(mode = "list", length = 31)
+for (i in 1:30) seedlist[[i]] <- sample.int(1000, 22)
+seedlist[[31]] <- sample.int(1000, 1)
+
+#as paper has done, we use repeated cross-validation with k=3 and 10 part splits
+
+control <- trainControl(method = "repeatedcv", number=10, repeats = 3, seeds = seedlist)
+metric <- "Accuracy"
+```
+
+```{r}
+library(randomForest)
+library(caret)
+library(ranger)
+```
+
+Train LDA and RF
+```{r, echo=FALSE}
+fit.lda2 <- train(diagnosis~., data=training, method="lda2", metric=metric, trControl=control)
+fit.rf <- train(diagnosis~., data=training, method="rf", metric=metric, trControl=control)
+```
+
+Checks
+```{r}
+results <- resamples(list(lda=fit.lda2, rf=fit.rf))
+summary(results)
+
+dotplot(results)
+```
+
+Calculating MSE: https://www.geeksforgeeks.org/r-language/calculate-mse-for-random-forest-in-r-using-package-randomforest/ 
+```{r}
+validation$diagnosis <- as.numeric(validation$diagnosis)
+```
+
+```{r}
+EnergyPred <- predict(fit.rf, validation)
+print(mean((EnergyPred - validation$diagnosis)^2))
+```
+Visualization ideas: https://towardsdatascience.com/a-visual-guide-to-tuning-random-forest-hyperparameters/ 
+Plotting MSE and most important features
+
+
+Hyperparameter testing
+Source: https://www.geeksforgeeks.org/machine-learning/hyperparameter-tuning-with-r/
+
+Grid search
+```{r}
+grid <- expand.grid(
+  mtry = c(1, 2, 3),
+  splitrule = "gini",
+  min.node.size = c(1, 5)
+)
+
+ctrl <- trainControl(method = "cv", number = 5, search = "grid")
+set.seed(123)
+grid_model <- train(
+  diagnosis ~ .,
+  data = training,
+  method = "ranger",
+  tuneGrid = grid,
+  trControl = ctrl
+)
+cat("Best Hyperparameters (Grid Search):\n")
+print(grid_model$bestTune)
+```
+
+Random search
+```{r}
+ctrl_random <- trainControl(method = "cv", number = 5, search = "random")
+
+set.seed(123)
+random_model <- train(
+  diagnosis ~ .,
+  data = training,
+  method = "ranger",
+  tuneLength = 10,   
+  trControl = ctrl_random
+)
+
+cat("\nBest Hyperparameters (Random Search):\n")
+print(random_model$bestTune)
+```
+how to take results from grid search and random search and incorporate that into running 
+
+run validation model using grid search hyperparameters
+```{r}
+validation_grid_model <- randomForest(diagnosis~.,
+                                      data=validation,
+                                      mtry=3,
+                                      nodesize=1) 
+```
+
+run validation model using random search hyperparameters
+```{r}
+validation_random_model <- randomForest(diagnosis~.,
+                                       data=validation,
+                                       mtry=9,
+                                       nodesize=3)
+```
+
+visualize results
