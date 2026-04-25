@@ -10,10 +10,9 @@ date: "2026-04-10"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+## Library and Data Loading
 
-Libraries
-```{r}
+```{r Load Libraries}
 library(OncoDataSets)
 library(dplyr)
 library(ggplot2)
@@ -23,19 +22,18 @@ library(caret)
 library(kerndwd)
 library(randomForest)
 ```
-Load in Data
-```{r}
+
+```{r Data Loading}
 df <- OncoDataSets::BreastCancerWI_df
 ```
 
-## Part 1: Entropy/Information Gain Analysis
+## Dimensional Reduction
 
 Reference: (https://rstudio-pubs-static.s3.amazonaws.com/455435_30729e265f7a4d049400d03a18e218db.html)
 
 The goal is to identify which variables contain the most information and use these to train the models. 
 
-Defining Entropy
-```{r}
+```{r Define Entropy Function}
 entropy <- function(X) {
   #create frequency table of X (count table devided by length of X) 
   freq <- table(X)/length(X)
@@ -51,8 +49,7 @@ entropy <- function(X) {
 }
 ```
 
-Testing Entropy function
-```{r}
+```{r Test Entropy Function, eval=FALSE}
 #looking at table
 freq <- table(df$diagnosis)/length(df$diagnosis)
 freq
@@ -79,7 +76,7 @@ Our predictive variables are numerical but entropy works with categorical variab
 Information gain will need to be calculated for each potential feature in our dataset that might provide information on what we want to predict (diagnosis), which is the 'parent'.
 
 Information Gain (Numeric)
-```{r}
+```{r Define Information Gain}
 
 #I'm going to split the function the resource used into two to more easily test and view it. The first part returns dd_data
 
@@ -120,8 +117,7 @@ ig_num <- function(data, feature, parent, bins=5) {
 }
 ```
 
-Testing Information Gain
-```{r}
+```{r Test Information Gain: One Entry, eval=FALSE}
 #test on one feature first
 ig_num(df, "radius_mean", "diagnosis")
 
@@ -131,7 +127,7 @@ dd(df,"radius_mean", "diagnosis", 5)
 It looks like 5 bins may be too much for this category, as the feature entropy drops to zero for the last two bins.
 
 Trying different bin numbers: 
-```{r}
+```{r Test Information Gain: Bin Numbers, eval=FALSE}
 ig_num(df, "radius_mean", "diagnosis", bins=3)
 
 #look at dd_data
@@ -140,7 +136,7 @@ dd(df,"radius_mean", "diagnosis", 3)
 Interestingly, we still lose the last bin, and the information gain drops, so 5 bins is better!
 
 More bin number tests:
-```{r}
+```{r Test Information Gain: More Bin Tests, eval=FALSE}
 ig_num(df, "radius_mean", "diagnosis", bins=4)
 ig_num(df, "radius_mean", "diagnosis", bins=7)
 ig_num(df, "radius_mean", "diagnosis", bins=10)
@@ -151,7 +147,7 @@ As expected, as number of bins increases, the IG increases, but at a certain poi
 We may want to consider whether different variables should have different bin numbers.
 
 Lets look at information gain for 5 bins with all variables.
-```{r}
+```{r Information Gain Calculation}
 #for loop
 
 #define empty vectors
@@ -172,22 +168,21 @@ ig_df
 ```
 We definitely need to weed out variables that are highly cross correlated.
 
-```{r}
+```{r Cross Correlation}
 M = cor(select(df,concave_points_peak, c(ig_df$col_name[1:20])))
-corrplot(M, method = 'number') # colorful number
+corrplot(M, method = 'colors') # colorful number
 ```
+
 Decided to Use PCA to limit variables.
 
-## Pt 2 Training Setup
-
-PCAs
-```{r}
+PCAs (By Carolyn)
+```{r PCA}
 pca <- prcomp(BreastCancerWI_df[, -1], center=TRUE, scale.=TRUE) #removing diagnostics column
 data.pca <- data.frame(diagnosis = df$diagnosis, pca$x[,1:10])
 ```
 
 Tried Entropy on PCAs just to See
-```{r}
+```{r PC Entropy, eval=FALSE}
 col_name2<-character()
 ig2<-numeric()
 
@@ -204,12 +199,13 @@ ig_df2<-arrange(data.frame(cbind(col_name2, round(ig2,2))),desc(V2))
 ig_df2
 ```
 
+## Initial Model Training
 
 Source: https://machinelearningmastery.com/machine-learning-in-r-step-by-step/
 Needed package 'caret'
 
 Set up training and verification datasets (70:30)
-```{r}
+```{r Creation of Training and Validation Datasets}
 
 #will need multiple seeds, easiest to set up vector of seeds from one seed
 set.seed(456)
@@ -226,7 +222,7 @@ validation <- data.pca[-train.index,]
 
 Training Harness
 (Setting up our training parameters)
-```{r}
+```{r Training Harness}
 
 #We will need multiple seeds throughout process, can set up seed vector of length one per model
 #we need one seed per model
@@ -246,18 +242,19 @@ control <- trainControl(method = "repeatedcv", number=10, repeats = 3, seeds = s
 metric <- "Accuracy"
 ```
 
-Train LDA
-```{r, echo=FALSE}
+```{r Train LDA and RF Models, cache=TRUE}
 fit.lda2 <- train(diagnosis~., data=training, method="lda2", metric=metric, trControl=control)
 fit.rf <- train(diagnosis~., data=training, method="rf", metric=metric, trControl=control)
 ```
 
-Checks
-```{r}
+
+```{r Compare Initial Model Performance}
 results <- resamples(list(lda=fit.lda2, rf=fit.rf))
 summary(results)
 
 dotplot(results)
+
+print(fit.rf)
 ```
 
 ## Scrap Heap (ignore)
