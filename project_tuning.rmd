@@ -1,10 +1,18 @@
 ---
-title: "run_and_test_models"
+title: "stat437_project_tuning"
 output: html_document
 date: "2026-04-22"
 ---
 
-PCAs
+libraries
+```{r}
+library(randomForest)
+library(caret)
+library(ranger)
+library(ggplot2)
+```
+
+PCA
 ```{r}
 pca <- prcomp(BreastCancerWI_df[, -1], center=TRUE, scale.=TRUE) #removing diagnostics column
 data.pca <- data.frame(diagnosis = df$diagnosis, pca$x[,1:10])
@@ -14,10 +22,6 @@ Source: https://machinelearningmastery.com/machine-learning-in-r-step-by-step/
 Needed package 'caret'
 
 Set up training and verification datasets (70:30)
-```{r}
-library(caret)
-```
-
 ```{r}
 #will need multiple seeds, easiest to set up vector of seeds from one seed
 set.seed(456)
@@ -54,12 +58,6 @@ control <- trainControl(method = "repeatedcv", number=10, repeats = 3, seeds = s
 metric <- "Accuracy"
 ```
 
-```{r}
-library(randomForest)
-library(caret)
-library(ranger)
-```
-
 Train LDA and RF
 ```{r, echo=FALSE}
 fit.lda2 <- train(diagnosis~., data=training, method="lda2", metric=metric, trControl=control)
@@ -74,75 +72,110 @@ summary(results)
 dotplot(results)
 ```
 
-Calculating MSE: https://www.geeksforgeeks.org/r-language/calculate-mse-for-random-forest-in-r-using-package-randomforest/ 
+Making predictions and confusion matrix using unseen data
 ```{r}
-validation$diagnosis <- as.numeric(validation$diagnosis)
+predictions_rf <- predict(fit.rf, newdata=validation)
+confusionMatrix(predictions_rf, validation$diagnosis)
 ```
+The paper looks at the following:
+Precision - 0.981
+Recall/sensitivity/true positive rate - 0.9626
+False positive rate - 0.0317
+Additionally, false negative rate - 0.0374
+
+We will now use hyperparameter tuning to obtain smallest out-of-bag (OOB) estimate error and improve the predictive power of the dataset.
+
+Starting with a grid search to find optimal mtry and min.node.size
+Source: https://www.geeksforgeeks.org/machine-learning/hyperparameter-tuning-with-r/ 
 
 ```{r}
-EnergyPred <- predict(fit.rf, validation)
-print(mean((EnergyPred - validation$diagnosis)^2))
-```
-Visualization ideas: https://towardsdatascience.com/a-visual-guide-to-tuning-random-forest-hyperparameters/ 
-Plotting MSE and most important features
-
-
-Hyperparameter testing
-Source: https://www.geeksforgeeks.org/machine-learning/hyperparameter-tuning-with-r/
-
-Grid search
-```{r}
+# define grid values to test
 grid <- expand.grid(
-  mtry = c(1, 2, 3),
+  mtry = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
   splitrule = "gini",
-  min.node.size = c(1, 5)
+  min.node.size = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 )
 
 ctrl <- trainControl(method = "cv", number = 5, search = "grid")
 set.seed(123)
-grid_model <- train(
+
+# train model based off of defined grid
+grid_tuned_model <- train(
   diagnosis ~ .,
   data = training,
-  method = "ranger",
+  method = "ranger", # use this method to incorporate min.node.size
   tuneGrid = grid,
   trControl = ctrl
 )
+
+# look at optimal hyperparameters
 cat("Best Hyperparameters (Grid Search):\n")
-print(grid_model$bestTune)
+print(grid_tuned_model$bestTune)
 ```
 
-Random search
-```{r}
-ctrl_random <- trainControl(method = "cv", number = 5, search = "random")
+Next, we will determine the optimal ntrees value to minimize OOB error and computational cost. Elbow plot shows point of diminishing returns, where adding more trees will not increase model performance but will heighten computational cost. 
 
-set.seed(123)
-random_model <- train(
-  diagnosis ~ .,
-  data = training,
-  method = "ranger",
-  tuneLength = 10,   
-  trControl = ctrl_random
+```{r}
+#build model with optimized hyperparameters from grid search and 2000 decision trees
+rf4 <- randomForest(diagnosis~., data=training, 
+                         ntree=2000, 
+                         mtry=2,
+                         nodesize=4)
+
+#visualize results
+plot(rf4)
+```
+1000 trees looks to be where OOB stabilizes. 
+
+Using the optimized mtry, minimum nodes, and ntree values, build the final tuned model. 
+```{r}
+grid <- expand.grid(mtry=c(2))
+
+final_tuned <- train(
+  diagnosis~., 
+  data=training, 
+  method="rf", 
+  trControl=control,
+  tuneGrid=grid,
+  ntree=1000,       
+  min.node.size=4        
 )
-
-cat("\nBest Hyperparameters (Random Search):\n")
-print(random_model$bestTune)
 ```
-how to take results from grid search and random search and incorporate that into running 
 
-run validation model using grid search hyperparameters
+Visualize accuracy metrics of the models
 ```{r}
-validation_grid_model <- randomForest(diagnosis~.,
-                                      data=validation,
-                                      mtry=3,
-                                      nodesize=1) 
-```
+results <- resamples(list(initial=fit.rf, tuned=final_tuned))
+summary(results)
 
-run validation model using random search hyperparameters
+dotplot(results)
+```
+Accuracy and kappa metrics:
+Our tuned model has an accuracy of 0.9474 which is slightly higher than the initial model which has a mean accuracy of 0.9457. Kappa increased from 0.8833 to 0.8873. Although this seems like a small change in accuracy, the train function used to build the model already builds a highly accurate model using a combination of cross-validation and automatic hyperparameter tuning.
+
+Apply tuned model to validation data
 ```{r}
-validation_random_model <- randomForest(diagnosis~.,
-                                       data=validation,
-                                       mtry=9,
-                                       nodesize=3)
+predictions <- predict(final_tuned, validation)
+confusionMatrix(predictions, validation$diagnosis)
+```
+The paper looks at the following:
+Precision - 0.972
+Recall/sensitivity/true positive rate - 0.981
+False positive rate - 0.0476
+Additionally, false negative rate - 0.0187
+
+Look at which variables are most important for random forest model, looking at mean decrease in accuracy. While the paper looks at mean decrease in gini index for variable importance, we trained our models using the train() function (to incorporate training controls) so importance() function can't be used. 
+```{r}
+var_importance <- varImp(final_tuned)
+print(var_importance)
+
+ggplot(var_importance)
 ```
 
-visualize results
+Look at loadings of PC1
+```{r}
+loadings <- pca$rotation[,1]
+sorted <- sort(loadings, decreasing=FALSE)
+print(sorted)
+```
+
+
