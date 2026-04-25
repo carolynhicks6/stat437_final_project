@@ -1,0 +1,213 @@
+---
+title: "Final Project Code"
+author: "T Goldberg and Carolyn Hicks" 
+output: html_document
+---
+
+## Setup
+
+Load Libraries:
+```{r Load Libraries}
+library(OncoDataSets)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(lattice)
+library(caret)
+library(kerndwd)
+library(randomForest)
+library(ranger)
+library(ggfortify)
+```
+```{r Load Dataset}
+df <- OncoDataSets::BreastCancerWI_df
+```
+
+## Dimensional Reduction and Feature Selection
+
+### Entropy Analysis
+(T Goldberg)
+
+Define Entropy Function
+```{r Define Entropy Function}
+entropy <- function(X) {
+  #create frequency table of X (count table devided by length of X) 
+  freq <- table(X)/length(X)
+  
+  #make frequencies a vector
+  vec <- as.data.frame(freq)[,2]
+  
+  #remove any zero counts if they occur because we will take log
+  vec<-vec[vec>0]
+
+  #entropy equation
+  -sum(vec * log2(vec))
+}
+```
+
+Define Information Gain
+```{r Define Information Gain}
+
+#I'm going to split the function the resource used into two to more easily test and view it. The first part returns dd_data
+
+dd <-function(data, feature, parent, bins) {
+ #clean out N/As
+  data <- data[!is.na(data[,feature]),]
+  
+  #now break up our dataset into bins based on length
+  data$cat<-cut(data[,feature], breaks=bins, labels=c(1:bins))
+  
+  #now we need to calculate the entropy of each feature (e)
+  #we will need to know how many items fall in each bin (n)
+  #to calculate frequency
+  #we can also look at max and mins for each bin if we want
+  
+  dd_data <- data %>% group_by(cat) %>% summarise(e=entropy(get(parent)), n = length(get(parent)), min=min(get(feature)), max=max(get(feature))   
+  )
+  
+  #now we need the probability for each feature value
+  dd_data$p<-dd_data$n/nrow(data)
+  
+  return(dd_data)
+}
+
+#now the IG 
+ig_num <- function(data, feature, parent, bins=5) {
+  
+  #entropy for our parent
+  eP <- entropy(data[,parent])
+  
+  #call dd
+  dd_data <- dd(data, feature, parent, bins)
+  
+  #and finally we can get our information gain
+  IG <- eP - sum(dd_data$p*dd_data$e)
+  
+  return(IG)
+}
+```
+
+Test Information Gain
+```{r Test Information Gain: One Entry, eval=FALSE}
+#test on one feature first
+ig_num(df, "radius_mean", "diagnosis")
+
+#look at dd_data
+dd(df,"radius_mean", "diagnosis", 5)
+
+#Based on results it looks like 5 bins may be too much for this category, as the feature entropy drops to zero for the last two bins. 
+```
+
+```{r Test Information Gain: Bin Numbers, eval=FALSE}
+#Testing various bin numbers
+ig_num(df, "radius_mean", "diagnosis", bins=3)
+
+#look at dd_data
+dd(df,"radius_mean", "diagnosis", 3)
+
+#Interestingly, we still lose the last bin, and the information gain drops, so 5 bins is better!
+```
+```{r Test Information Gain: More Bins, eval=FALSE}
+#We can look further at how bin number influences information gain for a single variable.
+
+ig_num(df, "radius_mean", "diagnosis", bins=4)
+ig_num(df, "radius_mean", "diagnosis", bins=7)
+ig_num(df, "radius_mean", "diagnosis", bins=10)
+ig_num(df, "radius_mean", "diagnosis", bins=15)
+
+#As expected, as number of bins increases, the IG increases, but at a certain point there are fewer gains.
+```
+
+Final Information Gain Calculation
+```{r Final Information Gain Calculation}
+#Calculating IG for all of are variables with 5 bins
+
+#define empty vectors
+col_name<-character()
+ig<-numeric()
+
+features <- names(df)
+length(features)
+
+#for loop
+for (i in 2:length(features)){
+  col_name[i]<-features[i]
+  ig[i]<-ig_num(df, names(df)[i], "diagnosis", bins=5)
+}
+
+ig_df<-arrange(data.frame(cbind(col_name, round(ig,2))),desc(V2))
+ig_df
+```
+
+Information Gain Correlation
+```{r Top IG Cross Correlation}
+#These variables are highly likely to be cross correlated, so we should check correlations.
+
+M = cor(select(df,concave_points_peak, c(ig_df$col_name[1:20])))
+corrplot(M, method = 'color') # colorful number
+
+#These variables are very highly correlated overall.
+```
+
+### Principal Component Analysis
+(Carolyn Hicks)
+
+Perform PCA
+```{r Perform PCA}
+pca <- prcomp(BreastCancerWI_df[, -1], center=TRUE, scale.=TRUE) #remove diagnosis column
+print(pca)
+summary(pca)
+```
+
+Visualize PCs
+```{r Visualize PCs}
+plot(pca,type="l") # lbow plot
+autoplot(pca, data = BreastCancerWI_df, loadings = TRUE, loadings.label=TRUE, colour="diagnosis")
+```
+
+PC Selection and Training Dataset:
+
+(Unused Version)
+```{r PC Selection and Training Dataset (Unused Code), eval=FALSE}
+#Note (TG): We ended up using a slightly different variable name for further analysis based on my training setup code, but this code is fully functional and equivalent.
+
+top_pcs <- pca$x[,1:10]
+
+library(dplyr)
+df <- BreastCancerWI_df |> select(diagnosis)
+
+top_pcs <- as.data.frame(top_pcs)
+df <- as.data.frame(df)
+training_df <-cbind(top_pcs, df)
+training_df
+```
+
+(Used Version)
+```{r PC Selection and Training Dataset (Used Code)}
+#(T Goldberg)
+data.pca <- data.frame(diagnosis = df$diagnosis, pca$x[,1:10])
+```
+
+Information Gain of PCs (T Goldberg)
+```{r IG of PCs}
+col_name2<-character()
+ig2<-numeric()
+
+features2 <- names(data.pca)
+length(features2)
+
+for (i in 2:length(features2)){
+  col_name2[i]<-features2[i]
+  ig2[i]<-ig_num(data.pca, names(data.pca)[i], "diagnosis", bins=5)
+}
+
+ig_df2<-arrange(data.frame(cbind(col_name2, round(ig2,2))),desc(V2))
+ig_df2
+#The top PC by far holds the most information.
+```
+
+## Model Selection and Initial Training
+
+## Random Forest Optimization and Validation
+
+## Feature Importance
