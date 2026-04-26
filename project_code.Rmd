@@ -88,7 +88,7 @@ ig_num <- function(data, feature, parent, bins=5) {
 ```
 
 Test Information Gain
-```{r Test Information Gain: One Entry, eval=FALSE}
+```{r Test Information Gain: One Entry}
 #test on one feature first
 ig_num(df, "radius_mean", "diagnosis")
 
@@ -98,7 +98,7 @@ dd(df,"radius_mean", "diagnosis", 5)
 #Based on results it looks like 5 bins may be too much for this category, as the feature entropy drops to zero for the last two bins. 
 ```
 
-```{r Test Information Gain: Bin Numbers, eval=FALSE}
+```{r Test Information Gain: Bin Numbers}
 #Testing various bin numbers
 ig_num(df, "radius_mean", "diagnosis", bins=3)
 
@@ -107,7 +107,7 @@ dd(df,"radius_mean", "diagnosis", 3)
 
 #Interestingly, we still lose the last bin, and the information gain drops, so 5 bins is better!
 ```
-```{r Test Information Gain: More Bins, eval=FALSE}
+```{r Test Information Gain: More Bins}
 #We can look further at how bin number influences information gain for a single variable.
 
 ig_num(df, "radius_mean", "diagnosis", bins=4)
@@ -167,7 +167,7 @@ autoplot(pca, data = BreastCancerWI_df, loadings = TRUE, loadings.label=TRUE, co
 
 PC Selection and Training Dataset:
 
-(Unused Version)
+Unused Version
 ```{r PC Selection and Training Dataset (Unused Code), eval=FALSE}
 #Note (TG): We ended up using a slightly different variable name for further analysis based on my training setup code, but this code is fully functional and equivalent.
 
@@ -182,7 +182,7 @@ training_df <-cbind(top_pcs, df)
 training_df
 ```
 
-(Used Version)
+Used Version
 ```{r PC Selection and Training Dataset (Used Code)}
 #(T Goldberg)
 data.pca <- data.frame(diagnosis = df$diagnosis, pca$x[,1:10])
@@ -206,8 +206,219 @@ ig_df2
 #The top PC by far holds the most information.
 ```
 
+Max Loadings
+```{r Max Loadings}
+loadings <- pca$rotation 
+abs_loadings <- abs(loadings)
+max_loadings <- apply(abs_loadings[, 1:10], 1, max) # first 10 PCs explain 95% of variance
+sorted <- sort(max_loadings, decreasing = TRUE)
+
+loadings_df <- as.data.frame(sorted)
+loadings_df
+```
+
+Max Loading Correlation
+```{r Max Loading Correlation}
+#(TG) Correlation Plot for Max Loading Variables
+corr_df <- select(BreastCancerWI_df, c(row.names(loadings_df)[1:10]))
+cor_matrix <- cor(corr_df)
+corrplot(cor_matrix, method='color')
+```
+
 ## Model Selection and Initial Training
+(T Goldberg)
+
+Split Training and Validation Datasets
+```{r Creation of Training and Validation Datasets}
+
+set.seed(456)
+
+#grabs indices of 70% of data with preserved class distribution for diagnosis
+train.index <- createDataPartition(data.pca$diagnosis, p=0.70, list=FALSE)
+
+#creates training dataset
+training <- data.pca[train.index,]
+
+#creates validation dataset
+validation <- data.pca[-train.index,]
+```
+
+Training Harness
+```{r Training Harness}
+
+#We will need multiple seeds throughout process due to parallel processing.
+#Caret package requires a seed per model tested, which is 30 models for 10-fold CV with k=3, plus a final seed
+#Each seed should be an integer of length at least x digits with x based on the model type
+#Difficult to ascertain the integer length, but 22 seemed to produce sufficient reproducibility
+#The final integer should be a single digit
+
+set.seed(456)
+
+seedlist <- vector(mode = "list", length = 31)
+for (i in 1:30) seedlist[[i]] <- sample.int(1000, 22)
+seedlist[[31]] <- sample.int(1000, 1)
+
+#as paper has done, we use repeated cross-validation with k=3 and 10 part splits and train for Accuracy
+
+control <- trainControl(method = "repeatedcv", number=10, repeats = 3, seeds = seedlist)
+metric <- "Accuracy"
+```
+
+Train LDA and RF Models with the Same Harness
+```{r Train LDA and RF Models, cache=TRUE}
+#note: seeds are reset within the harness
+fit.lda2 <- train(diagnosis~., data=training, method="lda2", metric=metric, trControl=control)
+fit.rf <- train(diagnosis~., data=training, method="rf", metric=metric, trControl=control)
+```
+
+Initial Model Comparison 
+```{r Initial Model Comparison}
+results <- resamples(list(lda=fit.lda2, rf=fit.rf))
+summary(results)
+
+dotplot(results)
+
+print(fit.rf)
+#Based on Accuracy and Kappa distributions, RF generally outperforms LDA
+```
 
 ## Random Forest Optimization and Validation
+(Carolyn Hicks)
 
+### Untuned Model Performance 
+
+Testing Untuned RF Model on Validation Set
+```{r Testing Untuned Model on Validation Set}
+#TG: added seed prior to running this for reproducibility
+set.seed(123)
+
+predictions_rf <- predict(fit.rf, newdata=validation)
+confusionMatrix(predictions_rf, validation$diagnosis)
+
+#Accuracy: 0.9647
+```
+
+### Optimizing Hyperparameters
+
+Grid Search to Optimize mtry and Minimum Node Size
+
+Define Grid:
+```{r Define Grid}
+# define grid values to test
+grid <- expand.grid(
+  mtry = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
+  splitrule = "gini",
+  min.node.size = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+)
+```
+
+Unused Grid Seeds (T Goldberg)
+```{r Grid Seeds, eval=FALSE}
+
+#I slightly modified the grid harness by adding a seeds vector, but the single seed was reproducing results
+
+set.seed(123)
+seedlist2 <- vector(mode = "list", length = 6)
+for (i in 1:5) seedlist2[[i]] <- sample.int(1000, 100)
+seedlist2[[6]] <- sample.int(1000, 1)
+```
+
+Create Grid Training Control
+```{r Create Grid Control}
+ctrl <- trainControl(method = "cv", number = 5, search = "grid")
+```
+
+Grid Optimization Training
+```{r Grid Optimization Training, cache=TRUE}
+
+set.seed(123)
+# train model based off of defined grid
+grid_tuned_model <- train(
+  diagnosis ~ .,
+  data = training,
+  method = "ranger", # use this method to incorporate min.node.size
+  tuneGrid = grid,
+  trControl = ctrl
+)
+```
+
+Optimal Grid Parameters
+```{r Optimal Parameters}
+cat("Best Hyperparameters (Grid Search):\n")
+print(grid_tuned_model$bestTune)
+
+#Optimal mtry = 4 and min.node.size = 2
+```
+
+Optimizing ntrees with OOB
+```{r Optimize ntrees with OOB, cache=TRUE}
+#build model with optimized hyperparameters from grid search and 2000 decision trees
+
+#TG: added seed prior to running this for reproducibility
+set.seed(123)
+rf4 <- randomForest(diagnosis~., data=training, 
+                         ntree=2000, 
+                         mtry=2,
+                         nodesize=4)
+
+#visualize results
+plot(rf4)
+#At a thousand trees it is relatively stable
+```
+Create Final Tuned Model
+```{r Create Final Tuned Model, cache=TRUE}
+#Use optimized parameters
+
+#TG: added seed prior to running this for reproducibility
+set.seed(123)
+
+grid <- expand.grid(mtry=c(2))
+
+final_tuned <- train(
+  diagnosis~., 
+  data=training, 
+  method="rf", 
+  trControl=control,
+  tuneGrid=grid,
+  ntree=1000,       
+  min.node.size=4        
+)
+```
+
+Final Model Accuracy
+```{r, Final Model Accuracy}
+results <- resamples(list(initial=fit.rf, tuned=final_tuned))
+summary(results)
+
+dotplot(results)
+#Accuracy: 0.948 vs 0.946
+#Kappa: 0.893 each
+```
+Final Model Validation
+```{r, Final Model Validation, cache=TRUE}
+
+#TG: added seed prior to running this for reproducibility
+set.seed(123)
+
+predictions <- predict(final_tuned, validation)
+confusionMatrix(predictions, validation$diagnosis)
+
+#Recall/sensitivity/true positive rate - 0.981
+```
 ## Feature Importance
+(Carolyn Hicks)
+
+Feature Importance of PCs
+```{r Feature Importance of PCs}
+var_importance <- varImp(final_tuned)
+print(var_importance)
+
+ggplot(var_importance)
+```
+Loadings of PC1
+```{r Loadings of PC1}
+loadings <- pca$rotation[,1]
+sorted <- sort(loadings, decreasing=FALSE)
+print(sorted)
+```
+

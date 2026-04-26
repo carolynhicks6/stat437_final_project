@@ -29,7 +29,7 @@ df <- OncoDataSets::BreastCancerWI_df
 
 ## Dimensional Reduction
 
-Reference: (https://rstudio-pubs-static.s3.amazonaws.com/455435_30729e265f7a4d049400d03a18e218db.html)
+References Used: (https://rstudio-pubs-static.s3.amazonaws.com/455435_30729e265f7a4d049400d03a18e218db.html)
 
 The goal is to identify which variables contain the most information and use these to train the models. 
 
@@ -170,7 +170,7 @@ We definitely need to weed out variables that are highly cross correlated.
 
 ```{r Cross Correlation}
 M = cor(select(df,concave_points_peak, c(ig_df$col_name[1:20])))
-corrplot(M, method = 'colors') # colorful number
+corrplot(M, method = 'color') # colorful number
 ```
 
 Decided to Use PCA to limit variables.
