@@ -1,4 +1,14 @@
 ---
+title: "proj_final"
+output: html_document
+date: "2026-04-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+---
 title: "Final Project Code"
 author: "T Goldberg and Carolyn Hicks" 
 output: html_document
@@ -18,7 +28,9 @@ library(kerndwd)
 library(randomForest)
 library(ranger)
 library(ggfortify)
+library(factoextra)
 ```
+
 ```{r Load Dataset}
 df <- OncoDataSets::BreastCancerWI_df
 ```
@@ -161,28 +173,13 @@ summary(pca)
 
 Visualize PCs
 ```{r Visualize PCs}
-plot(pca,type="l") # lbow plot
+fviz_screeplot(pca, ncp=30)
 autoplot(pca, data = BreastCancerWI_df, loadings = TRUE, loadings.label=TRUE, colour="diagnosis")
 ```
 
+
 PC Selection and Training Dataset:
 
-Unused Version
-```{r PC Selection and Training Dataset (Unused Code), eval=FALSE}
-#Note (TG): We ended up using a slightly different variable name for further analysis based on my training setup code, but this code is fully functional and equivalent.
-
-top_pcs <- pca$x[,1:10]
-
-library(dplyr)
-df <- BreastCancerWI_df |> select(diagnosis)
-
-top_pcs <- as.data.frame(top_pcs)
-df <- as.data.frame(df)
-training_df <-cbind(top_pcs, df)
-training_df
-```
-
-Used Version
 ```{r PC Selection and Training Dataset (Used Code)}
 #(T Goldberg)
 data.pca <- data.frame(diagnosis = df$diagnosis, pca$x[,1:10])
@@ -206,12 +203,13 @@ ig_df2
 #The top PC by far holds the most information.
 ```
 
-Max Loadings
+Max Loadings (Carolyn Hicks)
 ```{r Max Loadings}
+# find and sort maximum loadings across first 10 PCs
 loadings <- pca$rotation 
 abs_loadings <- abs(loadings)
 max_loadings <- apply(abs_loadings[, 1:10], 1, max) # first 10 PCs explain 95% of variance
-sorted <- sort(max_loadings, decreasing = TRUE)
+sorted <- sort(max_loadings, decreasing = TRUE) 
 
 loadings_df <- as.data.frame(sorted)
 loadings_df
@@ -344,7 +342,6 @@ grid_tuned_model <- train(
 
 Optimal Grid Parameters
 ```{r Optimal Parameters}
-cat("Best Hyperparameters (Grid Search):\n")
 print(grid_tuned_model$bestTune)
 
 #Optimal mtry = 4 and min.node.size = 2
@@ -381,7 +378,7 @@ final_tuned <- train(
   trControl=control,
   tuneGrid=grid,
   ntree=1000,       
-  min.node.size=4        
+  nodesize=4        
 )
 ```
 
@@ -420,5 +417,7 @@ Loadings of PC1
 loadings <- pca$rotation[,1]
 sorted <- sort(loadings, decreasing=FALSE)
 print(sorted)
-```
 
+loadings_df <- as.data.frame(sorted)
+head(loadings_df)
+```
