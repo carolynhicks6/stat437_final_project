@@ -1,7 +1,8 @@
 ---
-title: "qbio_project draft"
+title: "T Goldberg Draft Code"
 output:
-  html_document: default
+  html_document:
+    df_print: paged
   word_document: default
 date: "2026-04-10"
 ---
@@ -257,7 +258,8 @@ dotplot(results)
 print(fit.rf)
 ```
 
-## Scrap Heap (ignore)
+## Scrap Heap 
+Unused code, mainly failed attempts to obtain datasets we ended up not using.
 ```{r}
 #install.packages("OncoDataSets")
 #needs bioconductor installs for maftools and tcgabiolinks
