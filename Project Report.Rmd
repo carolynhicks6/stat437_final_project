@@ -1,0 +1,85 @@
+---
+title: "Predicting significant variables for oncogenicity using Wisconsin breast cancer data and machine learning models"
+author: "T Goldberg, Carolyn Hicks"
+date: "2026-04-29"
+output: pdf_document
+---
+
+## Introduction
+
+In the article *Machine learning random forest for predicting oncosomatic variant NGS analysis*, the authors presented and compared five machine learning (ML) algorithms for their ability to interpret next generation sequencing (NGS) results to predict oncosomatic variants (genetic variations which directly cause cancer). They looked at various cancer types, including colorectal, melanoma, and glioma, as well as different variant types, and finally identified amino acid change, variant allele frequency, and minor allele frequency as top features for oncosomatic variant prediction. To measure performance of the models, they used k-fold cross validation and a 70:30 split for data training and validation. The overall findings of this paper show that ML models, when constructed correctly, can be very important in processing large amounts of medical data, changing the way bioinformatic analysis is performed.
+
+In our analysis, we chose to limit our ML models to linear discriminant analysis (LDA) and random forest (RF). After initial training, we narrowed our focus further to tune and validate the RF model, which performed best in both our own and the original analysis. By comparing accuracy and kappa metrics throughout the process, we were able to build and tune a highly accurate RF model that predicts tumor malignancy based on tumor features. Our analysis utilizes the BreastCancerWI dataset from OncoDataSets in R. This dataset includes numerical data on tumor features and a binary diagnosis of benign $= 0$ and malignant $= 1$ for 569 patient samples.
+
+## Methods
+
+### Initial Feature Selection
+Tumor features were analyzed for Information Gain (IG) with respect to diagnosis. IG is defined relative to a class variable by comparing entropy of the variable to entropy within a single class, where entropy describes degrees of freedom within a variable.
+
+$\begin{aligned} {H_{p}}=H\left( p_{1}\ldots p_{n}\right) =\sum _{i=1}^{n}p_{i}log_{2}p_{i} \end{aligned}$
+$\begin{aligned} {H_{p}}=H\left( p_{1}\ldots p_{n}\right) =\sum _{i=1}^{n}p_{i}log_{2}p_{i} \end{aligned}$
+
+Entropy can only be calculated for categorical variables, so we partitioned our features into five categories relative to range. Variables with the highest IG were then tested for cross-correlation using the cor function. Additionally, we performed principal component analyses and tested variables with the highest loadings. Given the high degree of cross-correlation observed between our variables, we instead trained our models directly on the principal components that explained at least 0.95 of cumulative variance.
+
+### Model Training
+
+Model training was done using the *caret* package in R studio. Training and validation datasets were partitioned 70:30 and preserved overall class distribution. Random Forest and Linear Discriminant Analysis models were trained using repeated 10-fold cross-validation with three repeats. 10-fold cross-validation partitions the dataset into ten distribution preserving parts, training models on nine of the parts and predicting outcomes on the tenth. These partitions also preserve the distribution of the class variable. The process is repeated three times, and the model with the highest accuracy is then selected.
+
+To ensure reproducibility and directly compare the performance of the LDA and RF models, we provided a seed vector in our training harness to ensure that the same data partitions were used for both sets of models. We then compared the overall distribution of accuracy and kappa across the thirty RF and LDA models. 
+
+### Model Tuning and Validation
+
+Following the distribution of accuracy and kappa, the RF model had higher accuracy. To further improve the model, we then tuned RF hyperparameters. First, we used a grid search to test all possible combinations for provided vectors of *mtry* and minimum node size hyperparameters. Because 10 values were provided for each hyperparameter, there were 100 possible combinations tested, eventually returning the parameter combination for the most accurate model. While not technically considered a tunable parameter, *ntrees* was optimized by analyzing out-of-bag-error (OOB). To minimize computation costs, we identified the minimum number of trees at which OOB error stabilized. The final tuned model was constructed and applied to validation data, and we calculated accuracy, precision, sensitivity, specificity, and false positive rate (FPR) similarly to the authors.  
+
+$Accuracy=\frac{TP+TN}{TP+TN+FP+FN} \ Precision=\frac{TP}{TP+FP} \ Sensitivity=\frac{TP}{TP+FN}$
+
+$Specificity=\frac{TN}{TP+FN} \ False \ Postive \ Rate =\frac{FP}{FP+TN}$
+
+Finally, we determined which features contributed the most to our model by identifying the most important principal components and converting them back into features using loading calculations. 
+
+## Results
+
+Principal components 1-10 explained a cumulative variance proportion of 0.95157 and thus were chosen as variables for the LDA and RF models (see supplemental figure 2a). 70% of the dataset was allocated to model training, then we compared accuracy and kappa metrics to determine whether the RF or LDA model best represented our data. Similarly to the paper, we found that the RF model outperformed the LDA model in terms of accuracy and kappa (see supplemental figure 4). Accuracy metrics were 0.9458 and 0.9397 and kappa metrics were 0.8833 and 0.8659 for RF and LDA respectively. After generating a confusion matrix based off the RF model using the unseen validation dataset, accuracy was 0.9647, precision was 0.9385, sensitivity was 0.9683, specificity was 0.9626, and false positive rate was 0.0374. Because the RF model performed best in initial testing, we selected it for further tuning and optimized *mtry*, minimum node size, and *ntrees*. The final RF model parameters were $mtry=2$, $nodesize=4$, and $ntree=1000$. Tuning increased the accuracy of the RF model to 0.9499 on the training dataset. When tested on the validation set, accuracy was 0.9706, precision was 0.9677, sensitivity was 0.9524, specificity was 0.9813, and the false positive rate was 0.0187. Most of these calculations increased in comparison to the initial model, and the false positive rate decreased overall.
+
+We then determined which principal components were contributing the most to the tuned RF model. We found that PC1 was contributing the most to our model, followed by PC3 and PC2 (see supplemental figure 5a). Next, we arranged the loadings of PC1 by decreasing absolute value. Interestingly, all the loadings for PC1 were negative, showing an inverse relationship between the variable and PC. The top five variables contributing to PC1 were concave points mean, concavity mean, concave points peak, compactness mean, and perimeter peak (see supplemental figure 5b).
+
+## Discussion
+
+Overall, we found that with some modifications, we could use a Random Forest model to accurately predict whether a tumor was benign or malignant based on feature information. Our success with the RF model on a smaller numerical dataset demonstrates flexibility in bioinformatic applications. However, while several of our decisions were due to computational limitations or differences in our data, we also attempted to improve upon the original analysis. Here, we discuss the rationale behind our decisions, as well as the implications and limitations of both the original paper by Pellegrino and our own results.
+
+Most notably, we made the decision to train our models on Principal Components instead of directly using features due to the high amount of correlation between our variables. No correlation data was provided for the features used by Pellegrino *et al*, which appears to be a massive oversight considering that IG based selection does not account for covariates. While PCA could not have been performed on their categorical dataset, other methods exist to remove covariates. If Information Gain was the sole selection factor in training their models, it is possible that some of these features may have had high degrees of co-correlation, leading to redundancy within their training dataset and potentially biasing their models or reducing performance. While we initially ran PCA because our data was numerical and IG analysis required data loss when converting numerical data to categories, PCA both provided another method of identifying covariance as well as creating variables that were necessarily uncorrelated. Given the risks of training with highly correlated variables, we consider using PCs a large improvement. While this slightly complicated identification of feature importance when analyzing the final model, we were able to decompose the PCs back into our variables using the loading data.
+
+In addition to running our models on PCs, we made adjustments to our training and tuning procedures. We were limited to testing only two models due to computational constraints and chose LDA as our point of comparison with RF, as LDA is specialized for predicting class variables based on numerical data. We also added a seed vector to our training harness to prevent potential reproducibility issues caused by parallel processing that would not be mitigated by resetting a single seed. For tuning, we applied a Grid Search algorithm optimized for accuracy which allowed us to optimize minimum node size in addition to *mtry* and *ntrees*. Minimum node size was not considered in the original paper, and the Grid Search algorithm made it possible to identify the best combination of *mtry* and minimum node size rather than considering them separately. While we also optimized the *ntrees* parameter, we considered this less important given that *ntree* is generally set based on computational limits and not traditionally tuned. We also included false positive rate in our metrics for measuring model performance, though we did not plot an ROC curve as we did not test different classification thresholds and are unsure how Pellegrino *et al.* generated this curve for a single model.
+
+We also were not certain whether Pellegrino *et al.* used a two-part data training/validation data split as stated in their methods or a three-part split as depicted in their second figure. While a three part split would have been optimal, providing new data for tuning without overfitting by tuning using the final validation dataset, we used the two-part 70:30 split as stated in the methods. Given the small size of our dataset, reducing the size of either our training or validation sets by adding an additional split might not have been worth the benefit gained from a separate tuning partition.
+
+Another potential limitation of both our and the original work was the choice to use accuracy as the primary metric for optimization. Highly accurate models can still be ineffective, as accuracy can be biased when specific classifications are rare or extremely frequent. For instance, if our dataset had contained only a small number of malignant tumors, models that only predicted benign tumors would be highly accurate despite the high false negative and potentially outcompete models with better performance. However, distribution of diagnosis was not an issue in our dataset, and models with higher mean accuracies in k-fold testing also had higher mean kappa values. This was true of both our results and those of Pellegrino *et al*. Even if we may have missed a more optimal model with a lower accuracy, our final model performed highly on across several different metrics.
+
+Ultimately, we were able to demonstrate that Random Forest models are viable not only for the task of identifying oncosomatic gene variation based on genetic context but for evaluating malignancy based on tumor features. Despite large differences in the sizes of our datasets as well as a change to numerical variables, RF was successful even when much of the methodology used in training and tuning was unchanged. While this is only one alternative dataset, our findings demonstrate the flexibility of RF modeling and suggest the potential for their broad applicability in a number of bioinformatic contexts.
+
+## Quick Links
+
+GitHub link: https://github.com/carolynhicks6/STAT437_Final_Project  
+Paper link: https://www.nature.com/articles/s41598-021-01253-y#Sec2  
+
+## Team Contributions
+
+T Goldberg – entropy, correlation, PCA, data split, training harness, LDA vs. RF, seeds, methods, discussion, references, git.hub
+Carolyn Hicks – PCA, RF model tuning and final validation, introduction, methods, results, figure formatting, git.hub
+
+## References
+
+Pellegrino, E., Jacques, C., Beaufils, N. et al. Machine learning random forest for predicting oncosomatic variant NGS analysis. Sci Rep 11, 21820 (2021). https://doi.org/10.1038/s41598-021-01253-y
+
+Jette, P. Entropy, Information Gain, and Data Exploration in R (2019)
+https://rstudio-pubs-static.s3.amazonaws.com/455435_30729e265f7a4d049400d03a18e218db.html
+
+Brownlee, J. Your first machine learning project in R step-by-step. Machine Learning Mastery (2019). http://machinelearningmastery.com/machine-learning-in-r-step-by-step/
+
+Kuhn, Max (2008). “Building Predictive Models in R Using the caret Package.” Journal of Statistical Software, 28(5), 1–26. doi:10.18637/jss.v028.i05, https://www.jstatsoft.org/index.php/jss/article/view/v028i05.
+
+
+
+
+
+
