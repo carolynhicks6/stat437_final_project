@@ -16,8 +16,12 @@ In our analysis, we chose to limit our ML models to linear discriminant analysis
 ### Initial Feature Selection
 Tumor features were analyzed for Information Gain (IG) with respect to diagnosis. IG is defined relative to a class variable by comparing entropy of the variable to entropy within a single class, where entropy describes degrees of freedom within a variable.
 
-$\begin{aligned} {H_{p}}=H\left( p_{1}\ldots p_{n}\right) =\sum _{i=1}^{n}p_{i}log_{2}p_{i} \end{aligned}$
-$\begin{aligned} {H_{p}}=H\left( p_{1}\ldots p_{n}\right) =\sum _{i=1}^{n}p_{i}log_{2}p_{i} \end{aligned}$
+\begin{equation}
+  \begin{aligned}
+  H_{p} &= H\left(p_{1}, \dotsc, p_{n}\right) \\
+      &=\sum _{i=1}^{n}p_{i}\log_{2}p_{i}
+  \end{aligned}
+\end{equation}
 
 Entropy can only be calculated for categorical variables, so we partitioned our features into five categories relative to range. Variables with the highest IG were then tested for cross-correlation using the cor function. Additionally, we performed principal component analyses and tested variables with the highest loadings. Given the high degree of cross-correlation observed between our variables, we instead trained our models directly on the principal components that explained at least 0.95 of cumulative variance.
 
@@ -31,9 +35,15 @@ To ensure reproducibility and directly compare the performance of the LDA and RF
 
 Following the distribution of accuracy and kappa, the RF model had higher accuracy. To further improve the model, we then tuned RF hyperparameters. First, we used a grid search to test all possible combinations for provided vectors of *mtry* and minimum node size hyperparameters. Because 10 values were provided for each hyperparameter, there were 100 possible combinations tested, eventually returning the parameter combination for the most accurate model. While not technically considered a tunable parameter, *ntrees* was optimized by analyzing out-of-bag-error (OOB). To minimize computation costs, we identified the minimum number of trees at which OOB error stabilized. The final tuned model was constructed and applied to validation data, and we calculated accuracy, precision, sensitivity, specificity, and false positive rate (FPR) similarly to the authors.  
 
-$Accuracy=\frac{TP+TN}{TP+TN+FP+FN} \ Precision=\frac{TP}{TP+FP} \ Sensitivity=\frac{TP}{TP+FN}$
 
-$Specificity=\frac{TN}{TP+FN} \ False \ Postive \ Rate =\frac{FP}{FP+TN}$
+\begin{align}
+\mathrm{Accuracy}           &= \frac{TP+TN}{TP+TN+FP+FN} \\
+\mathrm{Precision}          &= \frac{TP}{TP+FP} \\
+\mathrm{Sensitivity}        &= \frac{TP}{TP+FN} \\
+\mathrm{Specificity}        &=\frac{TN}{TP+FN} \\
+\mathrm{False\ Positive\ Rate} &=\frac{FP}{FP+TN}
+\end{align}
+
 
 Finally, we determined which features contributed the most to our model by identifying the most important principal components and converting them back into features using loading calculations. 
 
